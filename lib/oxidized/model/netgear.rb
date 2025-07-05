@@ -78,7 +78,7 @@ class Netgear < Oxidized::Model
   cmd 'show running-config' do |cfg|
     cfg.gsub! /(System Up Time).*/, '\\1 <removed>'
     cfg.gsub! /\e\[.\e\[.K/, ''
-    cfg.gsub! /\cH/, ''
+    cfg.gsub! 'cH', ''
     cfg.gsub! /(Current SNTP Synchronized Time:).*/, '\\1 <removed>'
     cfg.gsub! /(Current System Time:).*/, '\\1 <removed>'
     cfg
