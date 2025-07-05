@@ -10,6 +10,7 @@ module Oxidized
     attr_accessor :running, :user, :email, :msg, :from, :stats, :retry, :err_type, :err_reason
     alias running? running
 
+    # opt is a hash with the node parameters given in the source (:name, :group, :ip...)
     def initialize(opt)
       Oxidized.logger.debug 'resolving DNS for %s...' % opt[:name]
       # remove the prefix if an IP Address is provided with one as IPAddr converts it to a network address.
@@ -37,7 +38,8 @@ module Oxidized
     end
 
     def run
-      status, config = :fail, nil
+      status = :fail
+      config = nil
       @input.each do |input|
         # don't try input if model is missing config block, we may need strong config to class_name map
         cfg_name = input.to_s.split('::').last.downcase
@@ -53,13 +55,15 @@ module Oxidized
           status = :no_connection
         end
       end
+      Oxidized.logger.error "No suitable input found for #{name}" unless @model.input
+
       @model.input = nil
       [status, config]
     end
 
     def run_input(input)
       rescue_fail = {}
-      [input.class::RescueFail, input.class.superclass::RescueFail].each do |hash|
+      [input.class::RESCUE_FAIL, input.class.superclass::RESCUE_FAIL].each do |hash|
         hash.each do |level, errors|
           errors.each do |err|
             rescue_fail[err] = level
@@ -79,20 +83,22 @@ module Oxidized
         @err_type = err.class.to_s
         @err_reason = err.message.to_s
         false
-      rescue StandardError => err
+      rescue StandardError => e
+        # Send a message in debug mode in case we are not able to create a crashfile
+        Oxidized.logger.send(:debug, '%s raised %s with msg "%s", creating crashfile' % [ip, e.class, e.message])
         crashdir  = Oxidized.config.crash.directory
         crashfile = Oxidized.config.crash.hostnames? ? name : ip.to_s
         FileUtils.mkdir_p(crashdir) unless File.directory?(crashdir)
 
         File.open File.join(crashdir, crashfile), 'w' do |fh|
           fh.puts Time.now.utc
-          fh.puts err.message + ' [' + err.class.to_s + ']'
+          fh.puts e.message + ' [' + e.class.to_s + ']'
           fh.puts '-' * 50
-          fh.puts err.backtrace
+          fh.puts e.backtrace
         end
-        Oxidized.logger.error '%s raised %s with msg "%s", %s saved' % [ip, err.class, err.message, crashfile]
-        @err_type = err.class.to_s
-        @err_reason = err.message.to_s
+        Oxidized.logger.error '%s raised %s with msg "%s", %s saved' % [ip, e.class, e.message, crashfile]
+        @err_type = e.class.to_s
+        @err_reason = e.message.to_s
         false
       end
     end
@@ -120,14 +126,10 @@ module Oxidized
       h
     end
 
+    JobStruct = Struct.new(:start, :end, :status, :time)
     def last=(job)
       if job
-        ostruct = OpenStruct.new
-        ostruct.start  = job.start
-        ostruct.end    = job.end
-        ostruct.status = job.status
-        ostruct.time   = job.time
-        @last = ostruct
+        @last = JobStruct.new(job.start, job.end, job.status, job.time)
       else
         @last = nil
       end
@@ -158,8 +160,11 @@ module Oxidized
 
     def resolve_input(opt)
       inputs = resolve_key :input, opt, Oxidized.config.input.default
-      inputs.split(/\s*,\s*/).map do |input|
-        Oxidized.mgr.add_input(input) || raise(MethodNotFound, "#{input} not found for node #{ip}") unless Oxidized.mgr.input[input]
+      inputs.split(',').map do |input|
+        input.strip!
+        unless Oxidized.mgr.input[input]
+          Oxidized.mgr.add_input(input) || raise(MethodNotFound, "#{input} not found for node #{ip}")
+        end
 
         Oxidized.mgr.input[input]
       end
@@ -167,7 +172,10 @@ module Oxidized
 
     def resolve_output(opt)
       output = resolve_key :output, opt, Oxidized.config.output.default
-      Oxidized.mgr.add_output(output) || raise(MethodNotFound, "#{output} not found for node #{ip}") unless Oxidized.mgr.output[output]
+      unless Oxidized.mgr.output[output]
+        Oxidized.mgr.add_output(output) || raise(MethodNotFound,
+                                                 "#{output} not found for node #{ip}")
+      end
 
       Oxidized.mgr.output[output]
     end
@@ -198,33 +206,47 @@ module Oxidized
     end
 
     def resolve_key(key, opt, global = nil)
-      # resolve key, first get global, then get group then get node config
+      # resolve key: the priority is as follows:
+      # node -> group specific model -> group -> model -> global passed -> global
+      # where node has the highest priority (= if defined, overwrites other values)
       key_sym = key.to_sym
       key_str = key.to_s
-      value   = global
-      Oxidized.logger.debug "node.rb: resolving node key '#{key}', with passed global value of '#{value}' and node value '#{opt[key_sym]}'"
+      model_name = @model.class.name.to_s.downcase
+      Oxidized.logger.debug "node.rb: resolving node key '#{key}', with passed global value of '#{global}' " \
+                            "and node value '#{opt[key_sym]}'"
 
-      # global
-      if (not value) && Oxidized.config.has_key?(key_str)
+      # Node
+      if opt[key_sym]
+        value = opt[key_sym]
+        Oxidized.logger.debug "node.rb: setting node key '#{key}' to value '#{value}' from node"
+
+      # Group specific model
+      elsif Oxidized.config.groups.has_key?(@group) &&
+            Oxidized.config.groups[@group].models.has_key?(model_name) &&
+            Oxidized.config.groups[@group].models[model_name].has_key?(key_str)
+        value = Oxidized.config.groups[@group].models[model_name][key_str]
+        Oxidized.logger.debug "node.rb: setting node key '#{key}' to value '#{value}' from model in group"
+
+      # Group
+      elsif Oxidized.config.groups.has_key?(@group) && Oxidized.config.groups[@group].has_key?(key_str)
+        value = Oxidized.config.groups[@group][key_str]
+        Oxidized.logger.debug "node.rb: setting node key '#{key}' to value '#{value}' from group"
+
+      # Model
+      elsif Oxidized.config.models.has_key?(model_name) && Oxidized.config.models[model_name].has_key?(key_str)
+        value = Oxidized.config.models[model_name][key_str]
+        Oxidized.logger.debug "node.rb: setting node key '#{key}' to value '#{value}' from model"
+
+      # Global passed
+      elsif global
+        value = global
+        Oxidized.logger.debug "node.rb: setting node key '#{key}' to value '#{value}' from passed global value"
+
+      # Global
+      elsif Oxidized.config.has_key?(key_str)
         value = Oxidized.config[key_str]
         Oxidized.logger.debug "node.rb: setting node key '#{key}' to value '#{value}' from global"
       end
-
-      # group
-      if Oxidized.config.groups.has_key?(@group) && Oxidized.config.groups[@group].has_key?(key_str)
-        value = Oxidized.config.groups[@group][key_str]
-        Oxidized.logger.debug "node.rb: setting node key '#{key}' to value '#{value}' from group"
-      end
-
-      # model
-      if Oxidized.config.models.has_key?(@model.class.name.to_s.downcase) && Oxidized.config.models[@model.class.name.to_s.downcase].has_key?(key_str)
-        value = Oxidized.config.models[@model.class.name.to_s.downcase][key_str]
-        Oxidized.logger.debug "node.rb: setting node key '#{key}' to value '#{value}' from model"
-      end
-
-      # node
-      value = opt[key_sym] || value
-      Oxidized.logger.debug "node.rb: returning node key '#{key}' with value '#{value}'"
       value
     end
 

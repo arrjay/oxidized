@@ -25,9 +25,11 @@ module Refinements
     end
 
     # sets @cmd and @name unless @name is already set
-    def set_cmd(command)
+    def process_cmd(command)
       @cmd = command
+      # rubocop:disable Naming/MemoizedInstanceVariableName
       @name ||= @cmd.to_s.strip.gsub(/\s+/, '_') # what to do when command is proc? #to_s seems ghetto
+      # rubocop:enable Naming/MemoizedInstanceVariableName
     end
 
     # Initializes the String instance variables from another String instance

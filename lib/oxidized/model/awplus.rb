@@ -15,8 +15,8 @@ class AWPlus < Oxidized::Model
 
   # Removes gibberish pager output e.g. VT100 escape codes
   cmd :all do |cfg|
-    cfg.gsub! /\e\[K/, ''         # example how to handle pager - cleareol EL0
-    cfg.gsub! /\e\[7m\e\[m/, ''   # example how to handle pager - Reverse SGR7
+    cfg.gsub! "\e[K", '' # example how to handle pager - cleareol EL0
+    cfg.gsub! "\e[7m\e[m", '' # example how to handle pager - Reverse SGR7
     cfg.delete! "\r" # Filters rogue ^M - see issue #415
     cfg.cut_both
   end
@@ -61,25 +61,28 @@ class AWPlus < Oxidized::Model
     cfg
   end
 
-  # Config required for telnet to detect username prompt
+  # Config required for telnet to detect username & password prompt.
   cfg :telnet do
     username /login:\s/
+    password /^Password:\s/
   end
 
-  # Main login config
+  # Config required for ssh to specify newline characters.
   cfg :telnet, :ssh do
+    newline "\r\n"
+
     post_login do
-      if vars :enable
-        send "enable\n"
-        expect /^Password:\s/
-        cmd vars(:enable) + "\r\n"
-      else
-        cmd 'enable' # Required for Priv-Exec users without enable PW to be put into "enable mode".
+      if vars(:enable) == true
+        cmd "enable"
+      elsif vars(:enable)
+        cmd "enable", /^[pP]assword:/
+        cmd vars(:enable)
       end
-      #      cmd 'terminal length 0' #set so the entire config is output without intervention.
+      # cmd 'terminal length 0' # set so the entire config is output without intervention.
     end
+
     pre_logout do
-      #      cmd 'terminal no length' #Sets term length back to default on exit.
+      # cmd 'terminal no length' # sets term length back to default on exit.
       send "exit\r\n"
     end
   end

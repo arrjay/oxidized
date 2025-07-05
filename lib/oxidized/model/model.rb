@@ -143,8 +143,8 @@ module Oxidized
       @input.send data
     end
 
-    def expect(regex, &block)
-      self.class.expect regex, &block
+    def expect(...)
+      self.class.expect(...)
     end
 
     def cfg
@@ -184,7 +184,7 @@ module Oxidized
     end
 
     def comment(str)
-      data = ''
+      data = String.new('')
       str.each_line do |line|
         data << self.class.comment << line
       end
@@ -202,7 +202,7 @@ module Oxidized
       # Also, XML Comments must not contain --. So we put a space between
       # any double hyphens, by replacing any - that is followed by another -
       # with '- '
-      data = ''
+      data = String.new('')
       str.each_line do |_line|
         data << '<!-- ' << str.gsub(/-(?=-)/, '- ').chomp << " -->\n"
       end
@@ -217,7 +217,7 @@ module Oxidized
 
     def process_cmd_output(output, name)
       output = String.new('') unless output.instance_of?(String)
-      output.set_cmd(name)
+      output.process_cmd(name)
       output
     end
   end

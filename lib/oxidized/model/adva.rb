@@ -6,7 +6,7 @@
 class ADVA < Oxidized::Model
   using Refinements
 
-  prompt /\w+\-+[#>]\s?$/
+  prompt /\w+-+[#>]\s?$/
   comment '# '
 
   cmd :secret do |cfg|
@@ -18,7 +18,7 @@ class ADVA < Oxidized::Model
     cfg.cut_both
   end
 
-  cmd 'show running-config current' do |cfg|
+  cmd 'show running-config delta' do |cfg|
     cfg.each_line.reject { |line| line.match /^Preparing configuration file.*/ }.join
   end
 

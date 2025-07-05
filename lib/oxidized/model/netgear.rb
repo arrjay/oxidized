@@ -2,7 +2,13 @@ class Netgear < Oxidized::Model
   using Refinements
 
   comment '!'
-  prompt /^(\([\w\s\-.]+\)\s[#>])$/
+  prompt /^\(?[\w \-+.]+\)? ?[#>] ?$/
+
+  # Handle pager for "show version" on old Netgear models: #2394
+  expect /^--More-- or \(q\)uit$/ do |data, re|
+    send ' '
+    data.sub re, ''
+  end
 
   # using a multiline RE here allows removing the paging prompt entirely.
   expect /\n--More-- or \(q\)uit$/m do |data, re|
@@ -74,6 +80,7 @@ class Netgear < Oxidized::Model
     cfg.gsub! /\e\[.\e\[.K/, ''
     cfg.gsub! /\cH/, ''
     cfg.gsub! /(Current SNTP Synchronized Time:).*/, '\\1 <removed>'
+    cfg.gsub! /(Current System Time:).*/, '\\1 <removed>'
     cfg
   end
 end

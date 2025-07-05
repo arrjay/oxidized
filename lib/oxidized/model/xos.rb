@@ -12,6 +12,13 @@ class XOS < Oxidized::Model
     cfg.each_line.to_a[1..-2].map { |line| line.delete("\r").rstrip }.join("\n") + "\n"
   end
 
+  cmd :secret do |cfg|
+    cfg.gsub! /^(configure (radius|radius-accounting) (netlogin|mgmt-access) (primary|secondary) shared-secret encrypted).+/, '\\1 <secret hidden>'
+    cfg.gsub! /^(configure account admin encrypted).+/, '\\1 <secret hidden>'
+    cfg.gsub! /^(create account (admin|user) (.+) encrypted).+/, '\\1 <secret hidden>'
+    cfg
+  end
+
   cmd 'show version' do |cfg|
     comment cfg
   end
@@ -26,7 +33,9 @@ class XOS < Oxidized::Model
 
   cmd 'show switch' do |cfg|
     cfg.gsub! /Next periodic save on.*/, ''
-    comment cfg.each_line.reject { |line| line.match(/Time:/) || line.match(/boot/i) || line.match(/Next periodic/) }.join
+    comment cfg.each_line.reject { |line|
+      line.match(/Time:/) || line.match(/boot/i) || line.match(/Next periodic/)
+    }.join
   end
 
   cmd 'show configuration' do |cfg|

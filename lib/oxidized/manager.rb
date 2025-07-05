@@ -5,15 +5,16 @@ module Oxidized
   require 'oxidized/source/source'
   class Manager
     class << self
-      def load(dir, file)
+      def load(dir, file, namespace)
         require File.join dir, file + '.rb'
-        klass = nil
-        [Oxidized, Object].each do |mod|
-          klass   = mod.constants.find { |const| const.to_s.casecmp(file).zero? }
-          klass ||= mod.constants.find { |const| const.to_s.downcase == 'oxidized' + file.downcase }
-          klass   = mod.const_get klass if klass
-          break if klass
-        end
+
+        # Search the object to load in namespace
+        klass = namespace.constants.find { |const| const.to_s.casecmp(file).zero? }
+
+        return false unless klass
+
+        klass = namespace.const_get klass
+
         i = klass.new
         i.setup if i.respond_to? :setup
         { file => klass }
@@ -33,32 +34,32 @@ module Oxidized
     end
 
     def add_input(name)
-      loader @input, Config::InputDir, "input", name
+      loader @input, Config::INPUT_DIR, "input", name, Oxidized
     end
 
     def add_output(name)
-      loader @output, Config::OutputDir, "output", name
+      loader @output, Config::OUTPUT_DIR, "output", name, Oxidized::Output
     end
 
     def add_source(name)
-      loader @source, Config::SourceDir, "source", name
+      loader @source, Config::SOURCE_DIR, "source", name, Oxidized::Source
     end
 
     def add_model(name)
-      loader @model, Config::ModelDir, "model", name
+      loader @model, Config::MODEL_DIR, "model", name, Object
     end
 
     def add_hook(name)
-      loader @hook, Config::HookDir, "hook", name
+      loader @hook, Config::HOOK_DIR, "hook", name, Object
     end
 
     private
 
     # if local version of file exists, load it, else load global - return falsy value if nothing loaded
-    def loader(hash, global_dir, local_dir, name)
-      dir   = File.join(Config::Root, local_dir)
-      map   = Manager.load(dir, name) if File.exist? File.join(dir, name + ".rb")
-      map ||= Manager.load(global_dir, name)
+    def loader(hash, global_dir, local_dir, name, namespace)
+      dir   = File.join(Config::ROOT, local_dir)
+      map   = Manager.load(dir, name, namespace) if File.exist? File.join(dir, name + ".rb")
+      map ||= Manager.load(global_dir, name, namespace)
       hash.merge!(map) if map
     end
   end

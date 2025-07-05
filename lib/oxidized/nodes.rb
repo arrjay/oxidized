@@ -1,8 +1,8 @@
 module Oxidized
   require 'ipaddr'
   require 'oxidized/node'
-  class Oxidized::NotSupported < OxidizedError; end
-  class Oxidized::NodeNotFound < OxidizedError; end
+  class NotSupported < OxidizedError; end
+  class NodeNotFound < OxidizedError; end
 
   class Nodes < Array
     attr_accessor :source, :jobs
@@ -21,13 +21,14 @@ module Oxidized
           begin
             node_obj = Node.new node
             new.push node_obj
-          rescue ModelNotFound => err
-            Oxidized.logger.error "node %s raised %s with message '%s'" % [node, err.class, err.message]
-          rescue Resolv::ResolvError => err
-            Oxidized.logger.error "node %s is not resolvable, raised %s with message '%s'" % [node, err.class, err.message]
+          rescue ModelNotFound => e
+            Oxidized.logger.error "node %s raised %s with message '%s'" % [node, e.class, e.message]
+          rescue Resolv::ResolvError => e
+            Oxidized.logger.error "node %s is not resolvable, raised %s with message '%s'" % [node, e.class, e.message]
           end
         end
         size.zero? ? replace(new) : update_nodes(new)
+        Output.clean_obsolete_nodes(self) if node_want.nil?
         Oxidized.logger.info "lib/oxidized/nodes.rb: Loaded #{size} nodes"
       end
     end
@@ -61,6 +62,9 @@ module Oxidized
       end
     end
 
+    # Returns the configuration of group/node_name
+    #
+    # #fetch is called by oxidzed-web
     def fetch(node_name, group)
       yield_node_output(node_name) do |node, output|
         output.fetch node, group
@@ -69,7 +73,7 @@ module Oxidized
 
     # @param node [String] name of the node moved into the head of array
     def next(node, opt = {})
-      return unless waiting.find_node_index(node)
+      return if running.find_index(node)
 
       with_lock do
         n = del node
@@ -80,7 +84,7 @@ module Oxidized
         # set last job to nil so that the node is picked for immediate update
         n.last = nil
         put n
-        jobs.want += 1 if Oxidized.config.next_adds_job?
+        jobs.increment if Oxidized.config.next_adds_job?
       end
     end
     alias top next
@@ -95,9 +99,12 @@ module Oxidized
     # @param node node whose index number in Nodes to find
     # @return [Fixnum] index number of node in Nodes
     def find_node_index(node)
-      find_index(node) || raise(Oxidized::NodeNotFound, "unable to find '#{node}'")
+      find_index(node) || raise(NodeNotFound, "unable to find '#{node}'")
     end
 
+    # Returns all stored versions of group/node_name
+    #
+    # Called by oxidized-web
     def version(node_name, group)
       yield_node_output(node_name) do |node, output|
         output.version node, group
@@ -116,6 +123,10 @@ module Oxidized
       end
     end
 
+    def find_index(node)
+      index { |e| [e.name, e.ip].include? node }
+    end
+
     private
 
     def initialize(opts = {})
@@ -129,12 +140,8 @@ module Oxidized
       end
     end
 
-    def with_lock(&block)
-      @mutex.synchronize(&block)
-    end
-
-    def find_index(node)
-      index { |e| [e.name, e.ip].include? node }
+    def with_lock(...)
+      @mutex.synchronize(...)
     end
 
     # @param node node which is removed from nodes list
@@ -160,13 +167,18 @@ module Oxidized
     # @param [Array] nodes Array of nodes used to replace+update old
     def update_nodes(nodes)
       old = dup
+      # load the Array "nodes" in self (the class Nodes inherits Array)
       replace(nodes)
       each do |node|
         if (i = old.find_node_index(node.name))
           node.stats = old[i].stats
           node.last  = old[i].last
         end
-      rescue Oxidized::NodeNotFound
+      rescue NodeNotFound
+        # Do nothing:
+        # when a node is not found, we have nothing to do:
+        # it has already been loaded by replace(nodes) and there are no
+        # stats to copy
       end
       sort_by! { |x| x.last.nil? ? Time.new(0) : x.last.end }
     end
@@ -174,8 +186,10 @@ module Oxidized
     def yield_node_output(node_name)
       with_lock do
         node = find { |n| n.name == node_name }
+        raise(NodeNotFound, "unable to find '#{node_name}'") if node.nil?
+
         output = node.output.new
-        raise Oxidized::NotSupported unless output.respond_to? :fetch
+        raise NotSupported unless output.respond_to? :fetch
 
         yield node, output
       end

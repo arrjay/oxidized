@@ -1,5 +1,8 @@
 # Sources
 
+Note: in all sources, the map attribute `name` is mandatory. It is used to identify the node and
+for example choose the filename for the configuration output.
+
 ## Source: CSV
 
 One line per device, colon separated. If `ip` isn't present, a DNS lookup will be done against `name`.  For large installations, setting `ip` will dramatically reduce startup time.
@@ -53,6 +56,24 @@ and within: `~/.gnupg/gpg.conf`
 
 ```text
 pinentry-mode loopback
+```
+
+## Source: JSONFile
+
+One object per device. Supports GPG encryption like the CSV Source.
+
+```yaml
+source:
+  default: jsonfile
+  jsonfile: 
+    file: /var/lib/oxidized/router.json
+    map:
+      name: hostname
+      model: os
+      username: username
+      password: password
+    vars_map:
+      enable: enable
 ```
 
 ## Source: SQL
@@ -186,4 +207,17 @@ source:
     url: https://url/api
     scheme: https
     secure: false
+```
+
+HTTP source also supports pagination. Two settings must be enabled. (`pagination` as a bool and `pagination_key_name` as a string)
+The `pagination_key_name` setting is the key name that an api returns to find the url of the next page.
+
+**Disclaimer**: currently only tested with netbox as the source
+
+```yaml
+source:
+  default: http
+  http:
+    pagination: true
+    pagination_key_name: 'next'
 ```

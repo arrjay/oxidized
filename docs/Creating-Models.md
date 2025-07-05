@@ -6,6 +6,14 @@ A user may wish to extend an existing model to collect the output of additional 
 
 This methodology allows local site changes to be preserved during Oxidized version updates / gem updates. It also enables convenient local development of new models.
 
+## Index
+- [Creating a new model](#creating-a-new-model)
+- [Extending an existing model with a new command](#extending-an-existing-model-with-a-new-command)
+- [Create unit tests for the model](#create-unit-tests-for-the-model)
+- [Advanced features](#advanced-features)
+- [Monkey-patching blocks in existing models](#monkey-patching-blocks-in-existing-models)
+- [Help](#help)
+
 ## Creating a new model
 
 An Oxidized model, at minimum, requires just three elements:
@@ -21,13 +29,19 @@ class RootWare < Oxidized::Model
   using Refinements
   
   cmd 'show complete-config'
+
+  cfg :ssh do
+    pre_logout 'exit'
+  end
+end
 ```
 
 This model, as-is will:
 
-* Log into the device and expect the default prompt.
+* Log into the device with ssh and expect the default prompt.
 * Upon matching it, execute the command `show complete-config`
 * Collect the output.
+* Logout with the command `exit`
 
 It is often useful to, at minimum, define the following additional elements for any newly introduced module:
 
@@ -39,6 +53,52 @@ It is often useful to, at minimum, define the following additional elements for 
 The API documentation contains a list of [methods](https://github.com/ytti/oxidized/blob/master/docs/Ruby-API.md#model) that can be used in modules.
 
 A more fleshed out example can be found in the `IOS` and `JunOS` models.
+
+### Common task: mechanism for handling 'enable' mode
+The following code snippet demonstrates how to handle sending the 'enable'
+command and an enable password.
+
+This example is taken from the `IOS` model. It covers scenarios where users
+need to enable privileged mode, either without providing a password (by setting
+`enable: true` in the configuration) or with a password.
+
+```ruby
+  cfg :telnet, :ssh do
+    post_login do
+      if vars(:enable) == true
+        cmd "enable"
+      elsif vars(:enable)
+        cmd "enable", /^[pP]assword:/
+        cmd vars(:enable)
+      end
+    end
+  end
+```
+Note: remove `:telnet, ` if your device does not support telnet.
+
+### Common Task: remove ANSI escape codes
+> :warning: This common task is experimental.
+> If it does not work for you, please open an issue so that we can adapt the
+> code snippet.
+
+Some devices produce ANSI escape codes to enhance the appearance of output.
+However, this can make prompt matching difficult and some of these ANSI escape
+codes might end up in the resulting configuration.
+
+You can remove most [ANSI escape codes](https://en.wikipedia.org/wiki/ANSI_escape_code#Control_Sequence_Introducer_commands) using the following Ruby
+code in your model:
+```
+  # Remove ANSI escape codes
+  expect /\e\[[0-?]*[ -\/]*[@-~]\r?/ do |data, re|
+    data.gsub re, ''
+  end
+```
+Explanation of the Regular Expression:
+- `\e\[`   : Control Sequence Introducer (CSI), which starts with "ESC [".
+- `[0-?]*` : "Parameter" bytes (range 0x30–0x3F, corresponding to ASCII `0–9:;<=>?`).
+- `[ -\/]*`: "Intermediate" bytes (range 0x20–0x2F, corresponding to ASCII ` !"#$%&'()*+,-./`).
+- `[@-~]`  : The "final" byte (range 0x40–0x7E, corresponding to ASCII ``@A–Z[\]^_`a–z{|}~).[``).
+- `\r?`    : Some ESC codes include a carriage return, which we do not want in the resulting config.
 
 ## Extending an existing model with a new command
 
@@ -71,6 +131,17 @@ Intuitively, it is also possible to:
 * Create a named variation of an existing model, by creating a file with a new name (such as `~/.config/oxidized/model/junos-extra.rb`), Then `require` the original model and extend its base class as in the above example. The named variation can then be specified as an OS type for specific devices that can benefit from the extra functionality. This allows for preservation of the base functionality for the default model types.
 * Create a completely new model, with a new name, for a new operating system type.
 * Testing/validation of an updated model from the [Oxidized GitHub repo models](https://github.com/ytti/oxidized/tree/master/lib/oxidized/model) by placing an updated model in the proper location without disrupting the gem-supplied model files.
+
+## Create Unit Tests for the Model
+If you want the model to be integrated into Oxidized, you can
+[submit a pull request on GitHub](https://github.com/ytti/oxidized/pulls).
+This is a greatly appreciated submission, as there are probably other users
+using the same network device as you are.
+
+A good (and optional) practice for submissions is to provide a
+[unit test for your model](/docs/ModelUnitTests.md). This reduces the risk that
+further developments could break it, and facilitates debugging issues without
+having access to a physical network device for the model.
 
 ## Advanced features
 
@@ -124,19 +195,19 @@ Examples:
 
 ```ruby
 cmd :secret, clear: true do
-  ... "(new code for secret removal which replaces the existing :secret definition in the model)" ...
+  # ... "(new code for secret removal which replaces the existing :secret definition in the model)" ...
 end
 ```
 
 ```ruby
 cmd 'show version', clear: true do |cfg|
-  ... "(new code for parsing 'show version', replaces the existing definition in the model)" ...
+  # ... "(new code for parsing 'show version', replaces the existing definition in the model)" ...
 end
 ```
 
 ```ruby
 cmd :ssh, prepend: true do
-  ... "(code that should run first, before any code in the existing :ssh definition in the model)" ...
+  # ... "(code that should run first, before any code in the existing :ssh definition in the model)" ...
 end
 ```
 

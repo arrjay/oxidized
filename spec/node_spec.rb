@@ -3,6 +3,7 @@ require_relative 'spec_helper'
 describe Oxidized::Node do
   before(:each) do
     Oxidized.asetus = Asetus.new
+    Oxidized.asetus.cfg.debug = false
     Oxidized.setup_logger
 
     Oxidized::Node.any_instance.stubs(:resolve_repo)
@@ -63,6 +64,20 @@ describe Oxidized::Node do
       fails = after_fails - before_fails
       _(fails).must_equal 1
     end
+
+    it 'should warn when no suitable input has been found' do
+      node = Oxidized::Node.new(name:     'example.com',
+                                input:    'http',
+                                output:   'git',
+                                model:    'junos',
+                                username: 'alma',
+                                password: 'armud',
+                                prompt:   'test_prompt')
+      Oxidized.logger.expects(:error)
+              .with("No suitable input found for example.com")
+      status, = node.run
+      _(status).must_equal :fail
+    end
   end
 
   describe '#repo' do
@@ -113,6 +128,70 @@ describe Oxidized::Node do
           _(node.repo).must_equal '/tmp/ggrroouupp.git'
         end
       end
+    end
+  end
+
+  describe '#resolve_key test hierarchy' do
+    let(:group) { 'test_group' }
+    let(:model) { 'junos' }
+    let(:node) do
+      Oxidized::Node.new(
+        ip: '127.0.0.1', group: group, model: model
+      )
+    end
+
+    describe 'create node with different usernames defined on each level' do
+      it 'should use global username if set' do
+        Oxidized.config.username = "global_username"
+        _(node.auth[:username]).must_equal "global_username"
+      end
+      it 'should prefer model username over global one' do
+        Oxidized.config.username = "global_username"
+        Oxidized.config.models[model].username = "model_username"
+        _(node.auth[:username]).must_equal "model_username"
+      end
+      it 'should prefer group username over model one' do
+        Oxidized.config.username = "global_username"
+        Oxidized.config.models[model].username = "model_username"
+        Oxidized.config.groups[group].username = "group_username"
+        _(node.auth[:username]).must_equal "group_username"
+      end
+      it 'should prefer model username group setting over normal group one' do
+        Oxidized.config.username = "global_username"
+        Oxidized.config.models[model].username = "model_username"
+        Oxidized.config.groups[group].username = "group_username"
+        Oxidized.config.groups[group].models[model].username = "group_model_username"
+        _(node.auth[:username]).must_equal "group_model_username"
+      end
+      it 'should prefer node username over everything else' do
+        Oxidized.config.username = "global_username"
+        Oxidized.config.models[model].username = "model_username"
+        Oxidized.config.groups[group].username = "group_username"
+        Oxidized.config.groups[group].models[model].username = "group_model_username"
+        node = Oxidized::Node.new(ip: '127.0.0.1', group: group, model: model, username: "node_username")
+        _(node.auth[:username]).must_equal "node_username"
+      end
+    end
+  end
+
+  describe '#resolve_input' do
+    it 'resolves input.default without whitespaces' do
+      Oxidized.config.input.default = 'ssh,telnet,ftp'
+
+      input_classes = @node.send(:resolve_input, {})
+      _(input_classes[0]).must_equal Oxidized::SSH
+      _(input_classes[1]).must_equal Oxidized::Telnet
+      _(input_classes[2]).must_equal Oxidized::FTP
+    end
+
+    it 'resolves input.default without whitespaces' do
+      Oxidized.config.input.default = "ssh  , \ttelnet, ftp ,scp"
+
+      input_classes = @node.send(:resolve_input, {})
+      _(input_classes[0]).must_equal Oxidized::SSH
+      _(input_classes[1]).must_equal Oxidized::Telnet
+      _(input_classes[2]).must_equal Oxidized::FTP
+      _(input_classes[3]).must_equal Oxidized::SCP
     end
   end
 end

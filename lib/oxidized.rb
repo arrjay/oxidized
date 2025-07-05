@@ -13,6 +13,7 @@ module Oxidized
   require 'oxidized/nodes'
   require 'oxidized/manager'
   require 'oxidized/hook'
+  require 'oxidized/signals'
   require 'oxidized/core'
 
   def self.asetus
@@ -36,7 +37,7 @@ module Oxidized
   end
 
   def self.setup_logger
-    FileUtils.mkdir_p(Config::Log) unless File.directory?(Config::Log)
+    FileUtils.mkdir_p(Config::LOG) unless File.directory?(Config::LOG)
     self.logger = if config.has_key?('use_syslog') && config.use_syslog
                     require 'syslog/logger'
                     Syslog::Logger.new('oxidized')
@@ -45,7 +46,7 @@ module Oxidized
                     if config.has_key?('log')
                       Logger.new(File.expand_path(config.log))
                     else
-                      Logger.new(STDERR)
+                      Logger.new($stderr)
                     end
                   end
     logger.level = Logger::INFO unless config.debug

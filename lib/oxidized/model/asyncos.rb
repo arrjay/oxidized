@@ -2,7 +2,7 @@ class AsyncOS < Oxidized::Model
   using Refinements
 
   # ESA prompt "(mail.example.com)> " or "mail.example.com> "
-  prompt /^\r*([(]?[\w. ]+[)]?[#>]\s+)$/
+  prompt /^\r*\(?[\w.\- ]+\)?[#>]\s+$/
   comment '! '
 
   # Select passphrase display option
@@ -25,9 +25,9 @@ class AsyncOS < Oxidized::Model
     # Delete hour and date which change each run
     # cfg.gsub! /\sCurrent Time: \S+\s\S+\s+\S+\s\S+\s\S+/, ' Current Time:'
     # Delete select passphrase display option
-    cfg.gsub! /Choose the passphrase option:/, ''
+    cfg.gsub! "Choose the passphrase option:", ''
     cfg.gsub! /1. Mask passphrases \(Files with masked passphrases cannot be loaded using/, ''
-    cfg.gsub! /loadconfig command\)/, ''
+    cfg.gsub! "loadconfig command)", ''
     cfg.gsub! /2. Encrypt passphrases/, ''
     cfg.gsub! /3. Plain passphrases/, ''
     cfg.gsub! /^3$/, ''

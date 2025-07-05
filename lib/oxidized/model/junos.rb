@@ -1,6 +1,5 @@
 class JunOS < Oxidized::Model
   using Refinements
-
   comment '# '
 
   def telnet
@@ -10,11 +9,13 @@ class JunOS < Oxidized::Model
   cmd :all do |cfg|
     cfg = cfg.cut_both if screenscrape
     cfg.gsub!(/  scale-subscriber (\s+)(\d+)/, '  scale-subscriber                <count>')
+    cfg.gsub!(/VMX-BANDWIDTH\s+(\d+) (.*)/, 'VMX-BANDWIDTH                  <count> \2')
     cfg.lines.map { |line| line.rstrip }.join("\n") + "\n"
   end
 
   cmd :secret do |cfg|
     cfg.gsub!(/community (\S+) {/, 'community <hidden> {')
+    cfg.gsub!(/(ssh-(rsa|dsa|ecdsa|ecdsa-sk|ed25519|ed25519-sk) )".*; ## SECRET-DATA/, '<secret removed>')
     cfg.gsub!(/ "\$\d\$\S+; ## SECRET-DATA/, ' <secret removed>;')
     cfg
   end
@@ -25,12 +26,16 @@ class JunOS < Oxidized::Model
   end
 
   post do
-    out = ''
+    out = String.new('')
     case @model
     when 'mx960'
       out << cmd('show chassis fabric reachability') { |cfg| comment cfg }
-    when /^(ex22|ex33|ex4|ex8|qfx)/
+    when /^(ex22|ex3[34]|ex4|ex8|qfx)/
       out << cmd('show virtual-chassis') { |cfg| comment cfg }
+    when /^srx/
+      out << cmd('show chassis cluster status') do |cfg|
+        cfg.lines.count <= 1 && cfg.include?("error:") ? '' : comment(cfg)
+      end
     end
     out
   end

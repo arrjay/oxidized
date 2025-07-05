@@ -4,7 +4,7 @@ module Oxidized
   require 'timeout'
   require 'oxidized/input/cli'
   class SSH < Input
-    RescueFail = {
+    RESCUE_FAIL = {
       debug: [
         Net::SSH::Disconnect
       ],
@@ -16,12 +16,16 @@ module Oxidized
     include Input::CLI
     class NoShell < OxidizedError; end
 
-    def connect(node)
+    def connect(node) # rubocop:disable Naming/PredicateMethod
       @node        = node
-      @output      = ''
+      @output      = String.new('')
       @pty_options = { term: "vt100" }
       @node.model.cfg['ssh'].each { |cb| instance_exec(&cb) }
-      @log = File.open(Oxidized::Config::Log + "/#{@node.ip}-ssh", 'w') if Oxidized.config.input.debug?
+      if Oxidized.config.input.debug?
+        logfile = Oxidized::Config::LOG + "/#{@node.ip}-ssh"
+        @log = File.open(logfile, 'w')
+        Oxidized.logger.debug "lib/oxidized/input/ssh.rb: I/O Debuging to #{logfile}"
+      end
 
       Oxidized.logger.debug "lib/oxidized/input/ssh.rb: Connecting to #{@node.name}"
       @ssh = Net::SSH.start(@node.ip, @node.auth[:username], make_ssh_opts)
@@ -41,12 +45,18 @@ module Oxidized
     end
 
     def cmd(cmd, expect = node.prompt)
-      Oxidized.logger.debug "lib/oxidized/input/ssh.rb #{cmd} @ #{node.name} with expect: #{expect.inspect}"
-      if @exec
-        @ssh.exec! cmd
-      else
-        cmd_shell(cmd, expect).gsub(/\r\n/, "\n")
+      Oxidized.logger.debug "lib/oxidized/input/ssh.rb #{cmd.dump} @ #{node.name} with expect: #{expect.inspect}"
+      if Oxidized.config.input.debug?
+        @log.puts "sent #{cmd.dump}"
+        @log.flush
       end
+      cmd_output = if @exec
+                     @ssh.exec! cmd
+                   else
+                     cmd_shell(cmd, expect).gsub("\r\n", "\n")
+                   end
+      # Make sure we return a String
+      cmd_output.to_s
     end
 
     def send(data)
@@ -65,7 +75,11 @@ module Oxidized
       disconnect_cli
       # if disconnect does not disconnect us, give up after timeout
       Timeout.timeout(Oxidized.config.timeout) { @ssh.loop }
-    rescue Errno::ECONNRESET, Net::SSH::Disconnect, IOError
+    rescue Errno::ECONNRESET, Net::SSH::Disconnect, IOError => e
+      Oxidized.logger.debug 'ssh: the other side closed the connection while ' \
+                            "disconnecting, rasing #{e.class} with #{e.messages}"
+    rescue Timeout::Error
+      Oxidized.logger.debug "ssh: #{@node.name} timed out while disconnecting"
     ensure
       @log.close if Oxidized.config.input.debug?
       (@ssh.close rescue true) unless @ssh.closed?
@@ -75,7 +89,7 @@ module Oxidized
       @ses = ssh.open_channel do |ch|
         ch.on_data do |_ch, data|
           if Oxidized.config.input.debug?
-            @log.print data
+            @log.puts "received #{data.dump}"
             @log.flush
           end
           @output << data
@@ -98,8 +112,8 @@ module Oxidized
     end
 
     def cmd_shell(cmd, expect_re)
-      @output = ''
-      @ses.send_data cmd + "\n"
+      @output = String.new('')
+      @ses.send_data cmd + newline
       @ses.process
       expect expect_re if expect_re
       @output
